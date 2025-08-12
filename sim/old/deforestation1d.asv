@@ -1,0 +1,143 @@
+% ########################
+% ### 1D deforestation ###
+% ########################
+
+% Last version: Aug 7 2025
+
+% ######################################################
+% ### Deforestation Model with Agribusiness Dynamics ###
+% ######################################################
+
+clear all; clc; close all;
+colormap hot;
+
+addpath functions\
+
+% ##################
+% ### Parameters ###
+% ##################
+
+global N beta alpha pi elasticity wage Tlag Sbar tau delta pI rho
+
+N = 15;
+Tmax = 100;            % Number of time periods
+beta = 0.10;
+alpha = 0.75;
+pi = 0.5;
+Tlag = 2;              % Time producing at low productivity
+delta = 1;             % Demand shifter
+tau = 1.2;             % Transport cost
+wage = 1;
+elasticity = 1.5;
+Sbar =6;
+pI = 1;
+rho = 1.5;
+
+q1 = (1-beta.*(1-pi))./(pi.*(beta.^Tlag));
+q2 = (1-beta.*(1-pi).*(1+pi.*(beta.^Tlag)))./(pi.*(beta.^Tlag).*(1-beta));
+q3 = (alpha.*(1-beta.^Tlag)+(beta.^Tlag).*(1-pi).*(1-beta))./(pi.*(beta.^Tlag).*(1-beta));
+
+% #######################
+% ### Grid Parameters ###
+% #######################
+
+A = 2.*ones(1,N);       % Productivity > 1
+F = 1.8*ones(1,N);        % Homogeneous deforestation cost
+L = zeros(1,N); L(1,1:N/2) = 1;% Legal status (1 = protected, 0 = unprotected)
+                           % everything is protected (static case)
+w = wage * ones(1,N);      % Constant wage
+
+% #######################
+% ##### Time Series #####
+% #######################
+
+D = zeros(1, N, Tmax); D(1,end,1) = 1; % Agrinusiness starts in one of the vertices
+O = zeros(1, N, Tmax); O_aux = rand(1,N); O(:,:,1) = D(1,1,1).*O_aux;
+R = zeros(1, N, Tmax); 
+Agribusiness = zeros(1, N, Tmax); Agribusiness(1,end,1) = 1; % Agrinusiness starts in one of the vertices
+
+% The following is a array that gets all the contiguous plots to a certain
+% plot i. Important for calculating agribusiness profits.
+neighbors = cell(1, N);
+
+for i = 1:N
+    idx = [i-1, i+1];        % left and right candidates
+    idx(idx < 1 | idx > N) = [];  % keep only valid ones
+    neighbors{i} = idx;
+end
+
+deforest = zeros(1,Tmax)
+emissions = zeros(1,Tmax)
+DiffProfit = zeros(1,N);  % This will store the differences in Agribusinessess
+                          % function psi in the model
+FarmersProfit = zeros(1,N);  % RHS of the R inequality.
+figure;                % Starting animation
+h = imagesc(D(1,:,1)); % Create heatmap
+colorbar;
+for t = 1:Tmax-1
+    % Calculating land prices R
+        % Step 1: calcuting agribusiness diff profits
+        for i =1:N
+            if Agribusiness(1,i,t) == 1 % we just need to compute this for plots    
+                                        % which have not been sold to an
+                                        % Agri
+                       continue;
+                    end
+                    pft = 0;
+                    ContAgri = sum(Agribusiness(1,neighbors{i},t)); % Counting the S
+                    for k = neighbors{i} % Computing profits in contiguous sites
+                        if Agribusiness(1,k,t)==1
+                            term1 = profit(A,ContAgri+1,k);
+                            term2 = profit(A,ContAgri,k);
+                            pft = pft + term1 - term2;
+                        end
+                    end
+                DiffProfit(1,i) = pft + profit(A,ContAgri+1,i); 
+        end
+        % Step 2: calculate the farmers profit when selling land
+     FarmersProfit = max(q1*F+q2*wage-q3*A-wage/(1-beta), (A-wage)/(1-beta));
+
+    R(1,:,t) = 1.*DiffProfit + 0*FarmersProfit;
+     
+    % Farmers
+    Vu = value_u(A,R(1,:,t),F);
+    Vp = value_p(A,F);
+
+    Du = L == 0 & D(1,:,t) ~= 1 & Agribusiness(1,:,t) ~= 1 & Vu > 0; 
+    Dp = L == 1 & D(1,:,t) ~= 1 & Agribusiness(1,:,t) ~= 1 & Vp > 0;
+    
+    % Updating Deforestation
+    D(1,:,t+1) = D(1,:,t) + Du+Dp;
+    % Updating Emissions
+    O(1,:,t+1) = (Dp+Du) .* O_aux;
+    % Updating the Agribusiness
+    Candidates = D(1,:,t) - Agribusiness(1,:,t); %plots that can gain property rights
+    PP = Candidates ==1 & rand(1,N) < pi & L==0; %plots that have earned property rights
+    NewAgri = PP==1 & DiffProfit >= R(1,:,t);
+    Agribusiness(1,:,t+1) = Agribusiness(1,:,t) + NewAgri;
+
+    set(h, 'CData', D(1,:,t)); % Update heatmap data
+    pause(0.1); % Pause for smooth animation
+
+    deforest(t) = sum(D(1,:,t))
+    emissions(t) = sum(O(1,:,t))
+end
+
+% === Final Heatmaps ===
+figure;
+subplot(1,2,1)
+imagesc(D(1,:,1)); colormap hot; colorbar;
+title('Initial Deforestation');
+
+subplot(1,2,2)
+imagesc(D(1,:,end)); colormap hot; colorbar;
+title('Final Deforestation');
+
+figure;
+subplot(1,2,1)
+plot(x, deforest, '-o', 'LineWidth', 1.5);
+xlabel('Time step');
+ylabel('Deforestation');
+title('Deforestation over Time');
+grid on;
+
